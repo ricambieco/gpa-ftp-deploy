@@ -1,0 +1,28 @@
+// Sample only. Never commit real hostnames, usernames or secrets.
+{
+  "ftpDeploy.profiles": {
+    "staging": {
+      "protocol": "ftps",
+      "host": "staging.example.org",
+      "port": 21,
+      "user": "staging-deployer",
+      "remotePath": "/var/www/staging",
+      "localRoot": "C:\\projects\\demo-site",
+      "ftpsImplicit": false,
+      "rejectUnauthorized": true,
+      "uploadOnSave": false,
+      "ignore": [".git", "node_modules", ".env", "*.log", "*.bak"]
+    },
+    "development": {
+      "protocol": "sftp",
+      "host": "dev.example.org",
+      "port": 22,
+      "user": "dev-deployer",
+      "remotePath": "/srv/www/dev",
+      "localRoot": "C:\\projects\\demo-site-dev",
+      "privateKeyPath": "C:\\Users\\developer\\.ssh\\id_ed25519",
+      "uploadOnSave": false,
+      "ignore": [".git", "node_modules", ".env"]
+    }
+  }
+}

@@ -1,5 +1,7 @@
 import * as ftp from 'basic-ftp';
+import SftpClient = require('ssh2-sftp-client');
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { FtpConfig } from './config';
 import { Logger } from './logger';
@@ -7,34 +9,31 @@ import { Logger } from './logger';
 /**
  * Converte un path locale assoluto nel path remoto corrispondente.
  *
- * localRoot : Z:\progetti\myapp   (o \\server\share\myapp)
- * localFile : Z:\progetti\myapp\sub\file.asp
+ * localRoot : Z:\\progetti\\myapp (o \\\\server\\share\\myapp)
+ * localFile : Z:\\progetti\\myapp\\sub\\file.asp
  * remotePath: /var/www/myapp
- * → risultato: /var/www/myapp/sub/file.asp
+ * -> risultato: /var/www/myapp/sub/file.asp
  */
 export function localToRemote(
   localFile: string,
   localRoot: string,
   remotePath: string
 ): string {
-  // Normalizza entrambi i path in lowercase per il confronto su Windows
   const normalRoot = localRoot.replace(/[/\\]+$/, '');
   const normalFile = localFile;
-
-  // Calcola il percorso relativo (usa path.relative che gestisce drive/UNC)
   const relative = path.relative(normalRoot, normalFile);
 
-  if (relative.startsWith('..')) {
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
     throw new Error(
       `File "${localFile}" is outside root folder "${localRoot}"`
     );
   }
 
-  // Converti separatori Windows in slash POSIX
   const posixRelative = relative.split(path.sep).join('/');
-  const remoteBase = remotePath.replace(/\/+$/, '');
-
-  return posixRelative ? `${remoteBase}/${posixRelative}` : remoteBase;
+  const remoteBase = remotePath.replace(/\/+$/, '') || '/';
+  return posixRelative
+    ? (remoteBase === '/' ? `/${posixRelative}` : `${remoteBase}/${posixRelative}`)
+    : remoteBase;
 }
 
 export interface UploadStats {
@@ -43,61 +42,163 @@ export interface UploadStats {
   errors: number;
 }
 
+function expandHome(filePath: string): string {
+  if (!filePath) return filePath;
+  if (filePath === '~') return os.homedir();
+  if (filePath.startsWith('~/') || filePath.startsWith('~\\')) {
+    return path.join(os.homedir(), filePath.slice(2));
+  }
+  return filePath;
+}
+
 export class FtpDeployClient {
-  private client: ftp.Client;
+  private ftpClient?: ftp.Client;
+  private sftpClient?: SftpClient;
+  private protocol?: FtpConfig['protocol'];
   private logger: Logger;
 
   constructor(logger: Logger) {
-    this.client = new ftp.Client();
     this.logger = logger;
   }
 
   async connect(cfg: FtpConfig): Promise<void> {
-    this.client.ftp.verbose = false;
+    this.protocol = cfg.protocol;
+
+    if (cfg.protocol === 'sftp') {
+      await this.connectSftp(cfg);
+      return;
+    }
+
+    await this.connectFtp(cfg);
+  }
+
+  private async connectFtp(cfg: FtpConfig): Promise<void> {
+    const client = new ftp.Client(cfg.timeout);
+    this.ftpClient = client;
+    client.ftp.verbose = false;
 
     const isFtps = cfg.protocol === 'ftps';
 
-    await this.client.access({
+    await client.access({
       host: cfg.host,
       port: cfg.port,
       user: cfg.user,
       password: cfg.password,
-      // secure: true  → FTPS esplicito (STARTTLS su porta 21)
-      // secure: 'implicit' → FTPS implicito (porta 990)
       secure: isFtps ? (cfg.ftpsImplicit ? 'implicit' : true) : false,
-      secureOptions: isFtps ? { rejectUnauthorized: cfg.rejectUnauthorized ?? true } : undefined,
+      secureOptions: isFtps
+        ? { rejectUnauthorized: cfg.rejectUnauthorized ?? true }
+        : undefined,
     });
 
-    if (cfg.passive) {
-      this.client.ftp.socket.setKeepAlive(true, 5000);
+    if (cfg.passive && client.ftp.socket) {
+      client.ftp.socket.setKeepAlive(true, 5000);
     }
 
     const proto = isFtps ? 'FTPS' : 'FTP';
     this.logger.info(`${proto} connected to ${cfg.host}:${cfg.port}`);
   }
 
-  close(): void {
-    this.client.close();
+  private async connectSftp(cfg: FtpConfig): Promise<void> {
+    const client = new SftpClient('gpa-ftp-deploy');
+    this.sftpClient = client;
+
+    const options: any = {
+      host: cfg.host,
+      port: cfg.port,
+      username: cfg.user,
+      readyTimeout: cfg.timeout,
+    };
+
+    if (cfg.privateKeyPath) {
+      const keyPath = expandHome(cfg.privateKeyPath);
+      if (!fs.existsSync(keyPath)) {
+        throw new Error(`SFTP private key not found: ${keyPath}`);
+      }
+      options.privateKey = fs.readFileSync(keyPath);
+      if (cfg.passphrase) {
+        options.passphrase = cfg.passphrase;
+      }
+      this.logger.info(`SFTP authentication: private key ${keyPath}`);
+    }
+
+    if (cfg.password) {
+      options.password = cfg.password;
+      if (!cfg.privateKeyPath) {
+        this.logger.info('SFTP authentication: password/keychain');
+      }
+    }
+
+    if (!cfg.privateKeyPath && !cfg.password) {
+      throw new Error('SFTP requires privateKeyPath or a password/keychain credential');
+    }
+
+    this.logger.info(`SFTP connecting to ${cfg.host}:${cfg.port} as ${cfg.user}`);
+    await client.connect(options);
+    this.logger.info(`SFTP connected to ${cfg.host}:${cfg.port}`);
   }
 
-  /**
-   * Carica un singolo file garantendo che la cartella remota esista.
-   */
+  async close(): Promise<void> {
+    if (this.sftpClient) {
+      const client = this.sftpClient;
+      this.sftpClient = undefined;
+      try {
+        await client.end();
+      } catch (e) {
+        this.logger.debug(`SFTP close warning: ${e}`);
+      }
+    }
+
+    if (this.ftpClient) {
+      const client = this.ftpClient;
+      this.ftpClient = undefined;
+      client.close();
+    }
+
+    this.protocol = undefined;
+  }
+
+  /** Carica un singolo file garantendo che la cartella remota esista. */
   async uploadFile(localFile: string, remoteDest: string): Promise<void> {
-    const remoteDir = remoteDest.substring(0, remoteDest.lastIndexOf('/')) || '/';
+    const remoteDir = path.posix.dirname(remoteDest) || '/';
     await this.ensureDir(remoteDir);
-    await this.client.uploadFrom(localFile, remoteDest);
+
+    if (this.protocol === 'sftp') {
+      if (!this.sftpClient) throw new Error('SFTP client is not connected');
+      await this.sftpClient.fastPut(localFile, remoteDest);
+    } else {
+      if (!this.ftpClient) throw new Error('FTP client is not connected');
+      await this.ftpClient.uploadFrom(localFile, remoteDest);
+    }
+
     this.logger.info(`✓ ${localFile} → ${remoteDest}`);
   }
 
-  /**
-   * Crea ricorsivamente le cartelle remote se non esistono.
-   * basic-ftp espone ensureDir() che fa proprio questo.
-   */
+  /** Remove one tracked remote file. Never called for unknown remote content. */
+  async deleteFile(remoteDest: string): Promise<void> {
+    if (this.protocol === 'sftp') {
+      if (!this.sftpClient) throw new Error('SFTP client is not connected');
+      await this.sftpClient.delete(remoteDest);
+    } else {
+      if (!this.ftpClient) throw new Error('FTP client is not connected');
+      await this.ftpClient.remove(remoteDest);
+    }
+    this.logger.info(`Deleted tracked remote file: ${remoteDest}`);
+  }
+
+  /** Crea ricorsivamente le cartelle remote se non esistono. */
   async ensureDir(remoteDir: string): Promise<void> {
-    await this.client.ensureDir(remoteDir);
-    // Torna alla root dopo ensureDir (basic-ftp cambia la cwd)
-    await this.client.cd('/');
+    if (!remoteDir || remoteDir === '/') return;
+
+    if (this.protocol === 'sftp') {
+      if (!this.sftpClient) throw new Error('SFTP client is not connected');
+      await this.sftpClient.mkdir(remoteDir, true);
+      return;
+    }
+
+    if (!this.ftpClient) throw new Error('FTP client is not connected');
+    await this.ftpClient.ensureDir(remoteDir);
+    // basic-ftp cambia la cwd durante ensureDir().
+    await this.ftpClient.cd('/');
   }
 
   /**
@@ -123,6 +224,7 @@ export class FtpDeployClient {
     stats: { uploaded: number; skipped: number; errors: number }
   ): Promise<void> {
     let entries: fs.Dirent[];
+
     try {
       entries = fs.readdirSync(currentLocal, { withFileTypes: true });
     } catch (e) {
@@ -157,12 +259,11 @@ export class FtpDeployClient {
 
   private shouldIgnore(name: string, patterns: string[]): boolean {
     for (const pattern of patterns) {
-      // Supporta wildcard semplici tipo *.user
       if (pattern.startsWith('*')) {
-        const ext = pattern.slice(1); // es: .user
+        const ext = pattern.slice(1);
         if (name.endsWith(ext)) return true;
-      } else {
-        if (name === pattern) return true;
+      } else if (name === pattern) {
+        return true;
       }
     }
     return false;

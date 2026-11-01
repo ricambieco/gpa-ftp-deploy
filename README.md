@@ -1,236 +1,50 @@
-# ⚡ GPA FTP Deploy
+# GPA FTP Deploy — RicambiEco community fork
 
-> FTP/FTPS/SFTP upload for VS Code — built for Windows Samba shares, mapped drives and multi-environment workflows.
+**Status: v1.3.4 VALIDATED (fork release; not an upstream release).** This is a public fork of [GPA FTP Deploy by gyagix](https://github.com/gyagix/gpa-ftp-deploy), with additional deployment workflows developed by RicambiEco. This project is **not affiliated with or endorsed by the upstream maintainer**.
 
-[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/GPAutomation.gpa-ftp-deploy?label=Marketplace&logo=visualstudiocode&color=00c9a7)](https://marketplace.visualstudio.com/items?itemName=GPAutomation.gpa-ftp-deploy)
-[![Downloads](https://img.shields.io/visual-studio-marketplace/d/GPAutomation.gpa-ftp-deploy?color=0084ff)](https://marketplace.visualstudio.com/items?itemName=GPAutomation.gpa-ftp-deploy)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![GitHub](https://img.shields.io/badge/GitHub-gyagix%2Fgpa--ftp--deploy-181717?logo=github)](https://github.com/gyagix/gpa-ftp-deploy)
-[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-%E2%98%95-FFDD00)](https://buymeacoffee.com/gpautomation)
+> The original project and its copyright notice are retained under the [MIT license](LICENSE). The fork's enhancements, documentation and release process are described below. **Do not mistake the original VS Code Marketplace listing for the fork's distribution.**
 
----
+## Features
 
-## Why this extension?
+| Capability | Upstream or fork enhancement | Documentation |
+| --- | --- | --- |
+| FTP / FTPS / SFTP, keychain, upload on save, profile selection | Original GPA FTP Deploy baseline | [Configuration](docs/guides/configuration.md) |
+| Multi-root workspace profile resolution | Fork enhancement | [Multi-root workflows](docs/guides/multi-root.md) |
+| Incremental upload based on SHA-256 | Fork enhancement (v1.3.0) | [Incremental deployment](docs/guides/incremental-deployment.md) |
+| Separate preview of pending changes | Fork enhancement (v1.3.2) | [Queue preview](docs/guides/queue-preview.md) |
+| Acknowledge selected file versions without transfer | Fork enhancement (v1.3.3) | [Queue management](docs/guides/queue-management.md) |
+| Reset local deployment baseline | Fork enhancement (v1.3.3) | [Queue management](docs/guides/queue-management.md) |
+| Folder-level and nested-folder selection, mixed state and filtering | Fork enhancement (v1.3.4) | [Folder selection](docs/guides/folder-selection.md) |
 
-Most FTP extensions break when `localRoot` is a mapped network drive (`Z:\projects\myapp`) or a UNC path (`\\server\share\myapp`). This one doesn't.
+## Quick start
 
-**Key highlights:**
-- 🗂️ **Multiple profiles** — dev / staging / prod, switchable from the status bar
-- 🔐 **OS Keychain storage** — passwords go to Windows Credential Manager or macOS Keychain, never to `settings.json`
-- 🌐 **Network drive safe** — supports mapped drives, UNC/Samba paths, and Git Bash / WSL auto-conversion
-- 💾 **Upload on save** — per-profile toggle, zero friction
-- 🖱️ **Explorer context menu** — right-click any file or folder → Upload
+1. Install this **fork's own compiled VSIX** after building it from source. Do not assume that the Marketplace version includes fork features.
+2. Open a workspace with `.vscode/settings.json` and configure `ftpDeploy.profiles`; see [the sample](docs/examples/settings.jsonc).
+3. In the Command Palette, run `FTP Deploy: Preview Incremental Changes` to review a plan.
+4. Optionally acknowledge previously uploaded files or reset the baseline after verifying server contents.
+5. Run `FTP Deploy: Upload Changes Since Last Upload` to compute a new plan and perform the confirmed deployment.
 
----
+**Important:** The preview is separate from upload. Reset/acknowledge operations only change local tracking; they do **not** validate what is on the remote host. The first incremental run cannot safely infer and delete unknown remote files.
 
-## Supported protocols
+## Documentation
 
-| Protocol | Port | Notes |
-|----------|------|-------|
-| **FTP**  | 21   | Standard, passive mode |
-| **FTPS** | 21 / 990 | TLS — explicit (STARTTLS) or implicit |
-| **SFTP** | 22   | SSH — password or private key |
+- [Documentation index](docs/README.md)
+- [Installation and building the VSIX](docs/guides/build-and-install.md)
+- [Configuration and security](docs/guides/configuration.md)
+- [Multi-root profile selection](docs/guides/multi-root.md)
+- [Incremental deployment](docs/guides/incremental-deployment.md)
+- [Preview and queue semantics](docs/guides/queue-preview.md)
+- [Queue actions and rollback](docs/guides/queue-management.md)
+- [Folder-level selection](docs/guides/folder-selection.md)
+- [Troubleshooting and verification](docs/guides/troubleshooting.md)
+- [Change history](CHANGELOG.md)
+- [Contribution and release policy](CONTRIBUTING.md)
+- [Differences from upstream](docs/UPSTREAM-DIFFERENCES.md)
 
----
+## Validation and build
 
-## Installation
+The project owner confirmed a successful VSIX build and functional acceptance test on 2026-11-01. This source archive was prepared separately from that build; the compiled VSIX is not included. To reproduce the build, run `npm install`, `npm run compile`, `npm test`, then `npx @vscode/vsce package`. Confirm the generated VSIX before publishing a binary.
 
-**From the Marketplace** (recommended):
+## License and attribution
 
-1. Open VS Code → Extensions (`Ctrl+Shift+X`)
-2. Search `GPA FTP Deploy`
-3. Click **Install**
-
-**From VSIX** (manual):
-
-```bash
-npm install
-npm install -g @vscode/vsce
-vsce package
-# Extensions → ··· → Install from VSIX → select the generated .vsix
-```
-
----
-
-## Configuration
-
-Open the workspace settings with `Ctrl+Shift+P` → **FTP Deploy: Open Workspace Config**  
-and add your profiles under `.vscode/settings.json`:
-
-```jsonc
-{
-  "ftpDeploy.profiles": {
-
-    "dev": {
-      "protocol": "ftp",
-      "host": "192.168.1.100",
-      "port": 21,
-      "user": "ftpuser",
-      // password: use "FTP Deploy: Save Password to Keychain" — never put it here
-      "remotePath": "/var/www/myapp",
-      "localRoot": "Z:\\projects\\myapp",   // mapped drive ✓
-      "uploadOnSave": true,
-      "passive": true,
-      "ignore": [".git", "node_modules", ".vs", "*.user", "Thumbs.db"]
-    },
-
-    "staging": {
-      "protocol": "ftps",
-      "host": "staging.example.com",
-      "user": "deploy",
-      "remotePath": "/var/www/staging",
-      "ftpsImplicit": false,          // true = port 990; false = STARTTLS port 21
-      "rejectUnauthorized": true,
-      "uploadOnSave": false
-    },
-
-    "prod": {
-      "protocol": "sftp",
-      "host": "prod.example.com",
-      "port": 22,
-      "user": "deploy",
-      "remotePath": "/var/www/prod",
-      "privateKeyPath": "C:\\Users\\you\\.ssh\\id_rsa",
-      "uploadOnSave": false
-    }
-
-  }
-}
-```
-
-### Automation / task invocation
-
-`FTP Deploy: Upload Entire Folder` can be triggered programmatically (e.g. from a
-build task) with an explicit profile, bypassing the profile picker:
-
-```js
-vscode.commands.executeCommand('ftpDeploy.uploadFolder', { profile: 'prod' });
-```
-
-By default it still shows the confirmation dialog. To skip it, either pass
-`skipConfirm: true` in the same call, or set `confirmBeforeUpload: false` on
-the profile (recommended — keeps automation profiles self-contained):
-
-```jsonc
-"deploy-automation": {
-  "protocol": "sftp",
-  "host": "prod.example.com",
-  "user": "deploy",
-  "remotePath": "/var/www/prod",
-  "confirmBeforeUpload": false   // no dialog when invoked from a task
-}
-```
-
-Interactive use (Command Palette / context menu) is unaffected unless the
-active profile itself has `confirmBeforeUpload: false`.
-
-### Accepted `localRoot` formats
-
-| Format | Example |
-|--------|---------|
-| Windows mapped drive | `Z:\\projects\\myapp` |
-| UNC / Samba path | `\\\\server\\share\\myapp` |
-| Git Bash / WSL | `/z/projects/myapp` → auto-converted |
-| *(empty)* | Uses the VS Code workspace root |
-
----
-
-## Password management
-
-Passwords should **never** live in `settings.json`. Use the Command Palette (`Ctrl+Shift+P`):
-
-| Command | Action |
-|---------|--------|
-| `FTP Deploy: Save Password to Keychain` | Prompts for password, stores it in the OS keychain |
-| `FTP Deploy: Remove Password from Keychain` | Deletes the stored password |
-
-**Resolution order:**
-1. OS keychain (Windows Credential Manager / macOS Keychain)
-2. `password` field in `settings.json` — used with a migration warning
-3. Interactive prompt → automatically saved to keychain
-
----
-
-## Commands
-
-All commands are available via the Command Palette (`Ctrl+Shift+P`):
-
-| Command | Description |
-|---------|-------------|
-| `FTP Deploy: Select Profile` | Switch active profile (QuickPick) |
-| `FTP Deploy: Upload Current File` | Upload the file open in the editor |
-| `FTP Deploy: Upload Entire Folder` | Upload the entire `localRoot` |
-| `FTP Deploy: Upload →` | Right-click a file/folder in the Explorer |
-| `FTP Deploy: Save Password to Keychain` | Store password securely |
-| `FTP Deploy: Remove Password from Keychain` | Delete stored password |
-| `FTP Deploy: Test Connection` | Verify server connectivity |
-| `FTP Deploy: Show Log` | Open Output → FTP Deploy |
-| `FTP Deploy: Open Workspace Config` | Open `.vscode/settings.json` |
-| `FTP Deploy: Add Profile` | Guided wizard for a new profile |
-
----
-
-## Status bar
-
-The active profile is shown in the bottom-right status bar:
-
-```
-☁ FTP: dev       ← click to switch
-```
-
-Click it (or run `FTP Deploy: Select Profile`) to change profile. The selection is remembered per workspace.
-
----
-
-## Protocol reference
-
-### FTP
-```jsonc
-{ "protocol": "ftp", "passive": true }
-```
-
-### FTPS (FTP over TLS)
-```jsonc
-{
-  "protocol": "ftps",
-  "ftpsImplicit": false,       // true = port 990; false = STARTTLS port 21
-  "rejectUnauthorized": false  // false only for self-signed certificates
-}
-```
-
-### SFTP (SSH)
-```jsonc
-{
-  "protocol": "sftp",
-  "port": 22,
-  // password auth: use "Save Password to Keychain"
-  // key-based auth:
-  "privateKeyPath": "C:\\Users\\you\\.ssh\\id_rsa",
-  "passphrase": ""  // leave empty if key has no passphrase
-}
-```
-
----
-
-## Requirements
-
-- VS Code `^1.80.0`
-- Node.js 18+ *(only for building from source)*
-
----
-
-## Contributing
-
-Pull requests and issues are welcome!
-
-1. Fork the repo
-2. Create your branch: `git checkout -b feature/my-feature`
-3. Commit: `git commit -m 'feat: add my feature'`
-4. Push: `git push origin feature/my-feature`
-5. Open a Pull Request
-
----
-
-## License
-
-[MIT](LICENSE) © 2026 GPAutomation / gyagix
+MIT; original copyright (c) 2026 Gianluca P remains in [LICENSE](LICENSE). Enhancements are separately documented and do not transfer upstream ownership. [Original repository](https://github.com/gyagix/gpa-ftp-deploy).

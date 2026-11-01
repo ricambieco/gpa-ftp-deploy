@@ -1,0 +1,7 @@
+Release: 1.3.4
+Status: VALIDATED
+Validation: VSIX build and functional acceptance confirmed by project owner on 2026-11-01
+Upstream: https://github.com/gyagix/gpa-ftp-deploy
+Fork: https://github.com/ricambieco/gpa-ftp-deploy
+Publishing: source package ready; GitHub commit/tag/release pending
+Binary: not included in this source archive

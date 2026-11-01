@@ -101,5 +101,8 @@ export function validate(cfg: FtpConfig): string | null {
   if (!cfg.host) return 'ftpDeploy.host not configured';
   if (!cfg.user) return 'ftpDeploy.user not configured';
   if (!cfg.localRoot) return 'Unable to determine local root folder';
+  if (cfg.protocol === 'sftp' && !cfg.privateKeyPath && !cfg.password) {
+    return 'SFTP requires privateKeyPath or a password/keychain credential';
+  }
   return null;
 }

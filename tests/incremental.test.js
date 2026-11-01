@@ -1,0 +1,30 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const {scan, planChanges, readSnapshot, saveSnapshot, safeRelative} = require('../out/incremental');
+const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ftp-deploy-test-'));
+try {
+  fs.mkdirSync(path.join(root,'sub'));
+  fs.writeFileSync(path.join(root,'a.txt'),'first');
+  fs.writeFileSync(path.join(root,'sub','b.txt'),'second');
+  fs.mkdirSync(path.join(root,'.git'));
+  fs.writeFileSync(path.join(root,'.git','config'),'secret');
+  const one = scan(root,['.git']);
+  assert.deepEqual(Object.keys(one).sort(),['a.txt','sub/b.txt']);
+  assert.deepEqual(planChanges(one, {}, ['.git']).upload,['a.txt','sub/b.txt']);
+  const manifest = path.join(root,'state.json');
+  saveSnapshot(manifest,one);
+  assert.deepEqual(readSnapshot(manifest),one);
+  fs.writeFileSync(path.join(root,'a.txt'),'modified');
+  fs.unlinkSync(path.join(root,'sub','b.txt'));
+  const two = scan(root,['.git','state.json']);
+  assert.deepEqual(planChanges(two,one,['.git']).upload,['a.txt']);
+  assert.deepEqual(planChanges(two,one,['.git']).remove,['sub/b.txt']);
+  assert.deepEqual(planChanges(two,one,['.git','sub']).remove,[]);
+  assert.equal(safeRelative('../bad'),false);
+  assert.equal(safeRelative('ok/sub.txt'),true);
+  fs.writeFileSync(manifest,JSON.stringify({'../bad':'a'.repeat(64)}));
+  assert.throws(()=>readSnapshot(manifest));
+  console.log('PASS: incremental snapshot, changed/new/deleted, ignore, integrity, path traversal');
+} finally {fs.rmSync(root,{recursive:true,force:true});}

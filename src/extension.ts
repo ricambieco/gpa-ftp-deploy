@@ -1,6 +1,9 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as crypto from 'crypto';
+import { scan, planChanges, readSnapshot, saveSnapshot, safeRelative, acknowledgeVersions, backupSnapshot } from './incremental';
+import { renderIncrementalPreview } from './incrementalPreview';
 import { getConfig, validate } from './config';
 import { FtpConfig } from './config';
 import { FtpDeployClient, localToRemote, UploadStats } from './ftpClient';
@@ -12,7 +15,7 @@ type IDeployClient = {
   connect(cfg: FtpConfig): Promise<void>;
   uploadFile(localFile: string, remoteDest: string): Promise<void>;
   uploadDirectory(localDir: string, localRoot: string, remotePath: string, ignore: string[]): Promise<UploadStats>;
-  close(): void;
+  close(): Promise<void>;
 };
 
 function getClient(cfg: FtpConfig, logger: Logger): IDeployClient {
@@ -38,7 +41,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // ── Upload on save ──────────────────────────────────────────────────────────
   const onSaveDisposable = vscode.workspace.onDidSaveTextDocument(async (doc) => {
-    const cfg = await resolveActiveConfig();
+    const cfg = await resolveActiveConfigForResource(doc.uri);
     if (!cfg || !cfg.uploadOnSave) return;
 
     const localFile = doc.uri.fsPath;
@@ -85,7 +88,7 @@ export function activate(context: vscode.ExtensionContext) {
   const uploadFileCmd = vscode.commands.registerCommand('ftpDeploy.uploadFile', async () => {
     const editor = vscode.window.activeTextEditor;
     if (!editor) { logger.warn('No active editor for upload'); vscode.window.showWarningMessage('FTP Deploy: no file open'); return; }
-    const cfg = await resolveActiveConfig();
+    const cfg = await resolveActiveConfigForResource(editor.document.uri);
     if (!cfg) return;
     await runUploadFile(editor.document.uri.fsPath, cfg);
   });
@@ -109,6 +112,128 @@ export function activate(context: vscode.ExtensionContext) {
       await runUploadDirectory(cfg.localRoot, cfg);
     }
   );
+
+  // ── Anteprima su richiesta, mai aperta automaticamente durante l'upload ──
+  const previewChangesCmd = vscode.commands.registerCommand('ftpDeploy.previewChanges', async (args?: {profile?: string}) => {
+    const cfg = await resolveActiveConfig(args?.profile);
+    if (!cfg) return;
+    try {
+      const manifest = incrementalManifestPath(context, cfg);
+      const current = scan(cfg.localRoot, cfg.ignore);
+      const previous = readSnapshot(manifest);
+      const plan = planChanges(current, previous, cfg.ignore);
+      const panel = vscode.window.createWebviewPanel(
+        'ftpDeploy.incrementalPreview', 'FTP Deploy: Incremental Changes', vscode.ViewColumn.Active,
+        {enableScripts: true, retainContextWhenHidden: false}
+      );
+      const refresh = (): void => {
+        const now = scan(cfg.localRoot, cfg.ignore);
+        const base = readSnapshot(manifest);
+        panel.webview.html = renderIncrementalPreview(
+          `${cfg.protocol}://${cfg.host}${cfg.remotePath}`,
+          planChanges(now, base, cfg.ignore), base, !fs.existsSync(manifest), true
+        );
+      };
+      // No remote writes: queue mutations only advance the local SHA-256 baseline.
+      panel.webview.onDidReceiveMessage(async (message: {type?: string; paths?: string[]}) => {
+        try {
+          if (message.type === 'exclude') {
+            const chosen = Array.isArray(message.paths) ? Array.from(new Set(message.paths)) : [];
+            if (!chosen.length || chosen.length > 100000 || chosen.some(p => typeof p !== 'string' || !safeRelative(p))) return;
+            const live = scan(cfg.localRoot, cfg.ignore);
+            const base = readSnapshot(manifest);
+            const livePlan = planChanges(live, base, cfg.ignore);
+            // Reject stale previews, including files edited while the confirmation modal is open.
+            if (chosen.some(rel => !plan.upload.includes(rel) || !livePlan.upload.includes(rel) || current[rel] !== live[rel])) {
+              vscode.window.showWarningMessage('FTP Deploy: anteprima non aggiornata. Riapri o aggiorna la selezione.');
+              refresh(); return;
+            }
+            const choice = await vscode.window.showWarningMessage(
+              `Escludere ${chosen.length} file dalla coda per la versione attuale? Non verranno caricati. La prossima modifica li farà ricomparire.`,
+              {modal: true}, 'Escludi versioni selezionate'
+            );
+            if (choice !== 'Escludi versioni selezionate') return;
+            const afterConfirm = scan(cfg.localRoot, cfg.ignore);
+            if (chosen.some(rel => afterConfirm[rel] !== live[rel])) { vscode.window.showWarningMessage('FTP Deploy: file modificati durante la conferma, operazione annullata.'); refresh(); return; }
+            backupSnapshot(manifest);
+            saveSnapshot(manifest, acknowledgeVersions(readSnapshot(manifest), afterConfirm, chosen));
+            logger.info(`Incremental queue: acknowledged ${chosen.length} version(s) locally; no remote operation`);
+            refresh();
+          } else if (message.type === 'reset') {
+            const choice = await vscode.window.showWarningMessage(
+              `RESET CODA per ${cfg.host}${cfg.remotePath}: tutti i file locali saranno considerati già presenti sul server SENZA VERIFICA REMOTA. Operazione potenzialmente rischiosa. Proseguire?`,
+              {modal: true}, 'Reset baseline locale'
+            );
+            if (choice !== 'Reset baseline locale') return;
+            const baseline = scan(cfg.localRoot, cfg.ignore);
+            backupSnapshot(manifest);
+            saveSnapshot(manifest, baseline);
+            logger.warn(`Incremental queue RESET: ${Object.keys(baseline).length} local files acknowledged; no remote operation`);
+            vscode.window.showInformationMessage(`FTP Deploy: coda azzerata (${Object.keys(baseline).length} file tracciati). Nessuna modifica remota.`);
+            refresh();
+          }
+        } catch (e) { logger.error(`Incremental queue operation failed: ${e}`); vscode.window.showErrorMessage(`FTP Deploy: errore gestione coda — ${e}`); }
+      });
+      refresh();
+    } catch (e) {
+      logger.error(`Incremental preview failed: ${e}`);
+      vscode.window.showErrorMessage(`FTP Deploy: cannot preview incremental changes — ${e}`);
+    }
+  });
+
+  const uploadChangesCmd = vscode.commands.registerCommand('ftpDeploy.uploadChanges', async (args?: {profile?: string}) => {
+    const cfg = await resolveActiveConfig(args?.profile);
+    if (!cfg) return;
+    const manifest = incrementalManifestPath(context, cfg);
+    try {
+      const current = scan(cfg.localRoot, cfg.ignore);
+      const previous = readSnapshot(manifest);
+      const plan = planChanges(current, previous, cfg.ignore);
+      if (!plan.upload.length && !plan.remove.length) {
+        vscode.window.showInformationMessage(`FTP Deploy: no changes (${plan.unchanged} unchanged).`);
+        return;
+      }
+      const firstRun = !fs.existsSync(manifest);
+      const answer = await vscode.window.showWarningMessage(
+        `FTP Deploy ${firstRun ? '(first incremental upload)' : '(incremental)'}: ${plan.upload.length} upload(s), ${plan.remove.length} tracked deletion(s), ${plan.unchanged} unchanged. Target: ${cfg.host}${cfg.remotePath}. ${firstRun ? 'No remote deletions will occur on first run. Existing remote files are not inventoried.' : 'Confirm before deleting tracked remote files.'}`,
+        { modal: true }, 'Deploy changes'
+      );
+      if (answer !== 'Deploy changes') return;
+      const client = getClient(cfg, logger) as FtpDeployClient;
+      const next = {...previous};
+      let uploaded = 0, deleted = 0, failed = 0;
+      await vscode.window.withProgress({location: vscode.ProgressLocation.Notification, title: 'FTP Deploy: incremental upload', cancellable: false}, async () => {
+        await client.connect(cfg);
+        try {
+          for (const rel of plan.upload) {
+            if (!safeRelative(rel)) { failed++; continue; }
+            try {
+              const local = path.join(cfg.localRoot, ...rel.split('/'));
+              // Detect changes between scanning and uploading; retry on next run.
+              const {hashFile} = await import('./incremental');
+              if (hashFile(local) !== current[rel]) throw new Error('File changed during scan');
+              await client.uploadFile(local, localToRemote(local, cfg.localRoot, cfg.remotePath));
+              next[rel] = current[rel]; uploaded++;
+            } catch (e) { failed++; logger.error(`Incremental upload failed: ${rel}: ${e}`); }
+          }
+          if (failed > 0) logger.warn("Skipping remote deletions because one or more uploads failed");
+          for (const rel of (failed > 0 ? [] : plan.remove)) {
+            if (!safeRelative(rel)) { failed++; continue; }
+            try {
+              const remote = path.posix.join(cfg.remotePath, rel);
+              await client.deleteFile(remote);
+              delete next[rel]; deleted++;
+            } catch(e) { failed++; logger.error(`Tracked deletion failed: ${rel}: ${e}`); }
+          }
+        } finally { await client.close(); }
+      });
+      saveSnapshot(manifest, next);
+      const report = `FTP Deploy: ${uploaded} uploaded, ${deleted} deleted, ${plan.unchanged} unchanged, ${failed} failed.`;
+      logger.info(report);
+      if (failed) vscode.window.showWarningMessage(report);
+      else vscode.window.showInformationMessage(report);
+    } catch(e) { logger.error(`Incremental deploy aborted: ${e}`); vscode.window.showErrorMessage(`FTP Deploy: incremental deploy aborted — ${e}`); }
+  });
 
   // ── Tasto destro nel file explorer ─────────────────────────────────────────
   const uploadSelectedCmd = vscode.commands.registerCommand(
@@ -187,7 +312,7 @@ export function activate(context: vscode.ExtensionContext) {
     try {
       await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Notification, title: `FTP Deploy: test [${statusBar.active}]…` },
-        async () => { await client.connect(cfg); client.close(); }
+        async () => { await client.connect(cfg); await client.close(); }
       );
       vscode.window.showInformationMessage(`FTP Deploy [${statusBar.active}]: ${cfg.host} OK ✓`);
       logger.info(`Connection test OK — profile: ${statusBar.active}, host: ${cfg.host}`);
@@ -381,6 +506,8 @@ export function activate(context: vscode.ExtensionContext) {
     selectProfileCmd,
     uploadFileCmd,
     uploadFolderCmd,
+    uploadChangesCmd,
+    previewChangesCmd,
     uploadSelectedCmd,
     savePasswordCmd,
     deletePasswordCmd,
@@ -432,18 +559,69 @@ async function resolveActiveConfig(profileOverride?: string): Promise<FtpConfig 
 }
 
 async function finalizeConfig(profileName: string, profile: ProfileSettings): Promise<FtpConfig | null> {
-  const password = await resolvePassword(
+  const password = await resolveProfilePassword(profileName, profile);
+  if (password === null) return null;
+
+  const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const cfg = profileToConfig(profileName, profile, password, wsRoot);
+
+  const err = validate(cfg);
+  if (err) {
+    logger.error(`Profile [${profileName}] validation failed: ${err}`);
+    vscode.window.showErrorMessage(`FTP Deploy [${profileName}]: ${err}`);
+    return null;
+  }
+  return cfg;
+}
+
+
+async function resolveProfilePassword(
+  profileName: string,
+  profile: ProfileSettings
+): Promise<string | null> {
+  const usesSftpPrivateKey =
+    (profile.protocol ?? 'ftp') === 'sftp' && !!profile.privateKeyPath;
+
+  if (usesSftpPrivateKey) {
+    return profile.password ?? '';
+  }
+
+  return resolvePassword(
     extensionContext,
     profileName,
     profile.host,
     profile.password ?? '',
     logger
   );
+}
+
+async function resolveActiveConfigForResource(resource: vscode.Uri): Promise<FtpConfig | null> {
+  const profiles = await loadProfiles(logger, resource);
+  const names = Object.keys(profiles);
+
+  if (names.length === 0) {
+    logger.error('No profiles configured in ftpDeploy.profiles');
+    vscode.window.showErrorMessage('FTP Deploy: no profiles configured in ftpDeploy.profiles');
+    return null;
+  }
+
+  let profileName = statusBar.active;
+  if (!profiles[profileName]) {
+    const previousProfile = profileName;
+    profileName = names[0];
+    statusBar.setProfile(profileName);
+    await extensionContext.workspaceState.update('activeProfile', profileName);
+    logger.info(`Profile "${previousProfile}" not found for resource, using "${profileName}"`);
+  }
+
+  const profile = profiles[profileName];
+  const password = await resolveProfilePassword(profileName, profile);
   if (password === null) return null;
 
-  const wsRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const resourceFolder = vscode.workspace.getWorkspaceFolder(resource);
+  const wsRoot = resourceFolder?.uri.fsPath
+    ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
   const cfg = profileToConfig(profileName, profile, password, wsRoot);
-
   const err = validate(cfg);
   if (err) {
     logger.error(`Profile [${profileName}] validation failed: ${err}`);
@@ -480,7 +658,7 @@ async function runUploadFile(localFile: string, cfg: FtpConfig): Promise<void> {
       async () => {
         await client.connect(cfg);
         try { await client.uploadFile(localFile, remoteDest); }
-        finally { client.close(); }
+        finally { await client.close(); }
       }
     );
     if (cfg.showNotifications) {
@@ -510,7 +688,7 @@ async function runUploadDirectory(localDir: string, cfg: FtpConfig): Promise<voi
         try {
           stats = await client.uploadDirectory(localDir, cfg.localRoot, cfg.remotePath, cfg.ignore);
         } finally {
-          client.close();
+          await client.close();
         }
       }
     );
@@ -526,4 +704,11 @@ async function runUploadDirectory(localDir: string, cfg: FtpConfig): Promise<voi
     vscode.window.showErrorMessage(`FTP Deploy: folder upload error — ${e}`);
     logger.error(`Upload failed for directory ${localDir}: ${e}`);
   }
+}
+
+/** One manifest per exact destination and local root. Shared by preview and upload. */
+function incrementalManifestPath(context: vscode.ExtensionContext, cfg: FtpConfig): string {
+  const scope = JSON.stringify([cfg.protocol, cfg.host, cfg.port, cfg.user, cfg.remotePath, path.resolve(cfg.localRoot)]);
+  const key = crypto.createHash('sha256').update(scope).digest('hex');
+  return path.join(context.globalStorageUri.fsPath, 'incremental', `${key}.json`);
 }

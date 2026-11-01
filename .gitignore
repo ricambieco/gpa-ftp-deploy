@@ -1,0 +1,11 @@
+node_modules/
+*.vsix
+*.vsixmanifest
+*.tgz
+*.log
+*.bak
+.env
+.env.*
+.vscode/settings.json
+.DS_Store
+coverage/

@@ -105,9 +105,9 @@ function stripJsonComments(text: string): string {
   return result;
 }
 
-export async function loadProfiles(logger?: Logger): Promise<ProfileMap> {
+export async function loadProfiles(logger?: Logger, resource?: vscode.Uri): Promise<ProfileMap> {
   // Prima prova via API VS Code
-  const cfg = vscode.workspace.getConfiguration('ftpDeploy');
+  const cfg = vscode.workspace.getConfiguration('ftpDeploy', resource);
   const profiles = cfg.get<ProfileMap>('profiles');
 
   // Non basta che esistano chiavi: su drive di rete la cache di getConfiguration()
@@ -126,9 +126,13 @@ export async function loadProfiles(logger?: Logger): Promise<ProfileMap> {
   // caduto non deve bloccare l'extension host, e un solo tentativo senza retry.
   try {
     const wsFolders = vscode.workspace.workspaceFolders;
-    if (wsFolders && wsFolders.length > 0) {
+    const resourceFolder = resource
+      ? vscode.workspace.getWorkspaceFolder(resource)
+      : undefined;
+    const fallbackFolder = resourceFolder ?? wsFolders?.[0];
+    if (fallbackFolder) {
       const settingsPath = require('path').join(
-        wsFolders[0].uri.fsPath, '.vscode', 'settings.json'
+        fallbackFolder.uri.fsPath, '.vscode', 'settings.json'
       );
       const raw = await readFileWithTimeout(settingsPath, FALLBACK_READ_TIMEOUT_MS);
       // Rimuovi commenti // e /* */ prima del parse, ignorando quelli dentro stringhe JSON
