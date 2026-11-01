@@ -4,7 +4,7 @@ These actions are provided in the interactive incremental preview. **Neither ope
 
 ## Acknowledge selected versions (mode A)
 
-Suppose `Ajax/orders.php` is reported as a new file, but it was already uploaded by another tool. Tick the file and choose **Acknowledge selected versions** (some button labels in v1.3.4 are currently Italian). Confirm the prompt. The extension records the file's *current SHA-256* in the manifest, treating that specific version as already deployed.
+Suppose `sample-site/orders.php` is reported as a new file, but it was already uploaded by another tool. Tick the file and choose **Acknowledge selected versions** (some button labels in v1.3.4 are currently Italian). Confirm the prompt. The extension records the file's *current SHA-256* in the manifest, treating that specific version as already deployed.
 
 ```text
 Before: orders.php hash A → pending
@@ -27,7 +27,7 @@ Before editing an existing manifest, the implementation writes a uniquely named 
 ## Example workflow
 
 1. Open preview for staging.
-2. Review `Ajax/` and `Ajax/Banche/` candidates.
+2. Review `sample-site/` and `sample-site/reports/` candidates.
 3. Select files known to be deployed and acknowledge their current versions.
 4. Change one acknowledged file and run the preview again.
 5. Confirm that it reappears as modified.

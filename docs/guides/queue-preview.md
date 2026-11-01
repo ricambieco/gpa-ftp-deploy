@@ -13,7 +13,7 @@ Tracked delete:1
 Unchanged:    20
 ```
 
-`Ajax/new.php` appears as **new** if absent from the manifest; `Ajax/orders.php` appears as **modified** if its hash differs; a removed local file appears as **tracked delete** only if its prior path was in the manifest.
+`sample-site/new.php` appears as **new** if absent from the manifest; `sample-site/orders.php` appears as **modified** if its hash differs; a removed local file appears as **tracked delete** only if its prior path was in the manifest.
 
 Use the checkboxes to choose upload candidates to acknowledge locally, then explicitly confirm the action. Deletion rows are not candidates for the selected-version acknowledgement operation.
 

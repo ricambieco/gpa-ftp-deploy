@@ -8,17 +8,17 @@ Initial local files:
 
 ```text
 index.php              SHA-256 A
-Ajax/orders.php        SHA-256 B
-Ajax/Banche/import.php SHA-256 C
+sample-site/orders.php        SHA-256 B
+sample-site/reports/import.php SHA-256 C
 ```
 
 On the **first** incremental run there is no trusted baseline, so all three local files are candidates for upload. Unknown remote files are **not** deleted.
 
-After successful upload, change only `Ajax/orders.php` (hash B → B2), and remove `Ajax/Banche/import.php` locally:
+After successful upload, change only `sample-site/orders.php` (hash B → B2), and remove `sample-site/reports/import.php` locally:
 
 ```text
-UPLOAD Ajax/orders.php
-DELETE Ajax/Banche/import.php   # previously tracked file only
+UPLOAD sample-site/orders.php
+DELETE sample-site/reports/import.php   # previously tracked file only
 UNCHANGED index.php
 ```
 

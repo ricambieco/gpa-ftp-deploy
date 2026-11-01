@@ -3,7 +3,7 @@
 The version history below applies to the RicambiEco fork, not the upstream repository. Version 1.3.4 was validated by the project owner after a successful VSIX build and functional acceptance test. Earlier entries describe the progression of the fork; they are not upstream releases.
 
 ## v1.3.4 — 2026-11-01 — Validated
-- Added a folder tree to the incremental preview. Checking `Ajax/` selects files under `Ajax/` and nested folders such as `Ajax/Banche/`.
+- Added a folder tree to the incremental preview. Checking `sample-site/` selects files under `sample-site/` and nested folders such as `sample-site/reports/`.
 - Added individual nested-folder deselection, three-state parent checkboxes, folder filtering and select-all/deselect-all actions.
 - Group selection only modifies the preview selection; the manifest changes after the user explicitly acknowledges selected versions.
 - Retained the separate upload command and remote-deletion safeguards.

@@ -32,7 +32,7 @@ Regenerate dependency state with `npm install`, then run `npm run compile` and `
 | Edit one tracked local file | Only changed hash becomes pending |
 | Acknowledge an unchanged local version | It disappears from the pending-upload list |
 | Edit the acknowledged version | It returns to the pending-upload list |
-| Select `Ajax/`, deselect `Ajax/Banche/` | Only files outside the child folder remain selected |
+| Select `sample-site/`, deselect `sample-site/reports/` | Only files outside the child folder remain selected |
 | Reset baseline (test environment only) | Local pending uploads clear without remote transfer |
 | Restore backup manifest | Prior pending state is recoverable |
 | Reopen preview after an edit | Fresh plan is displayed |

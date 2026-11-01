@@ -25,11 +25,11 @@ console.log('Incremental preview tests: PASS');
 
 // 1.3.4: folder-wide selection is preview-only, with nested folder paths and mixed states.
 const grouped = renderIncrementalPreview('host', {
-  upload:['Ajax/Api.php','Ajax/Banche/banks_de.php','Ajax/Banche/iban_parser.php','Images/logo.png'],
+  upload:['sample-site/Api.php','sample-site/reports/banks_de.php','sample-site/reports/iban_parser.php','Images/logo.png'],
   remove:[], unchanged:0
 }, {}, false, true);
 assert.ok(grouped.includes('Selezione per percorso'));
-assert.ok(grouped.includes('Filtra cartelle (es. Ajax/Banche)'));
+assert.ok(grouped.includes('Filtra cartelle (es. sample-site/reports)'));
 assert.ok(grouped.includes("const folder=segments.slice(0,n).join('/')+'/';"));
 assert.ok(grouped.includes('for(const file of files)file.checked=check.checked'));
 assert.ok(grouped.includes('entry.check.indeterminate=count>0&&count<entry.files.length'));
@@ -37,5 +37,5 @@ assert.ok(grouped.includes('deselect-all'));
 const script = grouped.match(/<script>([\s\S]*?)<\/script>/);
 assert.ok(script, 'Preview must have a script');
 assert.doesNotThrow(() => new Function(script[1]), 'Webview JavaScript must be syntactically valid');
-const readOnly = renderIncrementalPreview('host', {upload:['Ajax/a.php'], remove:[], unchanged:0}, {}, false, false);
+const readOnly = renderIncrementalPreview('host', {upload:['sample-site/a.php'], remove:[], unchanged:0}, {}, false, false);
 assert.ok(!readOnly.includes('id="folder-tree"'), 'Folder selection must only appear in interactive preview');

@@ -5,19 +5,19 @@ In the incremental preview, a separate folder tree is derived from the *pending 
 ## Example: parent and child folders
 
 ```text
-Ajax/
+sample-site/
 ├── orders.php
 ├── returns.php
-└── Banche/
+└── reports/
     ├── iban_parser.php
     └── import.php
 ```
 
-1. Check **`Ajax/`**: all four pending upload files are selected.
-2. Uncheck **`Ajax/Banche/`**: `orders.php` and `returns.php` stay selected; the two files under `Banche/` are unselected.
-3. The `Ajax/` checkbox becomes **indeterminate** (partially selected).
-4. Check `Ajax/Banche/` again: all four are selected; the parent checkbox is fully checked.
-5. Type `Ajax/Banche` in the folder filter: the visible folder list narrows; the underlying selection is not implicitly changed.
+1. Check **`sample-site/`**: all four pending upload files are selected.
+2. Uncheck **`sample-site/reports/`**: `orders.php` and `returns.php` stay selected; the two files under `reports/` are unselected.
+3. The `sample-site/` checkbox becomes **indeterminate** (partially selected).
+4. Check `sample-site/reports/` again: all four are selected; the parent checkbox is fully checked.
+5. Type `sample-site/reports` in the folder filter: the visible folder list narrows; the underlying selection is not implicitly changed.
 6. Use **Select all** or **Deselect all** to change the entire pending-upload selection.
 
 **Key distinction:** The folder tree only changes checkboxes. No local manifest is modified until you press **Acknowledge selected versions** and confirm. Normal incremental uploads still compute their own current plan and are not limited to the preview's temporary checkbox selection.
